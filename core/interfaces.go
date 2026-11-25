@@ -403,6 +403,29 @@ type UserInputSteerer interface {
 	SteerUserInput(prompt string) (bool, error)
 }
 
+// SideQuestioner is an optional AgentSession extension for agents that can
+// answer a transient "by the way" question from the live conversation context
+// (including a turn still in progress) without adding the question or the
+// answer to the session history. Used by /btw.
+type SideQuestioner interface {
+	SideQuestion(ctx context.Context, question string) (string, error)
+}
+
+// SideQuestionAgent is an optional Agent extension reporting that its sessions
+// implement SideQuestioner, so /btw can tell "agent lacks side questions" (keep
+// the legacy /btw == /ps behavior) apart from "no live session yet".
+type SideQuestionAgent interface {
+	SupportsSideQuestion() bool
+}
+
+// SessionForker is an optional Agent extension for /fork: it starts a new
+// session branched from an existing agent session, leaving the source
+// unchanged. The returned session may report an empty CurrentSessionID until
+// the agent materializes the fork (Claude Code does so on the first turn).
+type SessionForker interface {
+	StartForkedSession(ctx context.Context, sourceSessionID string) (AgentSession, error)
+}
+
 // ToolAuthorizer is an optional interface for agents that support dynamic tool authorization.
 type ToolAuthorizer interface {
 	AddAllowedTools(tools ...string) error

@@ -64,6 +64,12 @@ type claudeSession struct {
 	settingsSequence  uint64
 	settingsRequestID string
 
+	// sideQuestions routes side_question control responses (/btw) back to
+	// the waiting SideQuestion call, keyed by request_id.
+	sideQuestionMu  sync.Mutex
+	sideQuestionSeq uint64
+	sideQuestions   map[string]chan sideQuestionReply
+
 	// usageMu guards lastUsage. Populated from the most recent result event.
 	usageMu   sync.Mutex
 	lastUsage *core.ContextUsage
@@ -303,8 +309,15 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 	if mode != "" && mode != "default" {
 		innerArgs = append(innerArgs, "--permission-mode", mode)
 	}
-	switch sessionID {
-	case "", core.ContinueSession:
+	forkSource, isFork := forkSourceFromSessionID(sessionID)
+	switch {
+	case isFork:
+		// /fork: branch from the source transcript. Claude Code assigns the
+		// new session ID (reported in the init event) and only writes the
+		// branch on its first turn; the source transcript is never modified.
+		innerArgs = append(innerArgs, "--resume", forkSource, "--fork-session")
+		sessionID = ""
+	case sessionID == "" || sessionID == core.ContinueSession:
 		// Truly fresh session — no resume, no continue.
 	default:
 		// Resuming a known session ID — this is cc-connect's own session
@@ -1676,6 +1689,10 @@ func (cs *claudeSession) updateActiveModel(model string) {
 // them, including for unsupported requests or changed protocol envelopes.
 func (cs *claudeSession) handleControlResponse(raw map[string]any) {
 	resp, _ := raw["response"].(map[string]any)
+	if id, _ := resp["request_id"].(string); strings.HasPrefix(id, sideQuestionRequestPrefix) {
+		cs.deliverSideQuestion(id, resp)
+		return
+	}
 	cs.effortMu.Lock()
 	defer cs.effortMu.Unlock()
 	if id, _ := resp["request_id"].(string); id == "" || id != cs.settingsRequestID {

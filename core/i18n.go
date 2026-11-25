@@ -559,6 +559,23 @@ const (
 	MsgPsEmpty           MsgKey = "ps_empty"
 	MsgPsNoSession       MsgKey = "ps_no_session"
 
+	// /btw side questions and /fork (see btw_fork.go)
+	MsgBtwUsage           MsgKey = "btw_usage"
+	MsgBtwThinking        MsgKey = "btw_thinking"
+	MsgBtwNotInHistory    MsgKey = "btw_not_in_history"
+	MsgBtwTimedOut        MsgKey = "btw_timed_out"
+	MsgBtwCancelled       MsgKey = "btw_cancelled"
+	MsgBtwCancelledNote   MsgKey = "btw_cancelled_note"
+	MsgBtwNothingToCancel MsgKey = "btw_nothing_to_cancel"
+	MsgBtwQueued          MsgKey = "btw_queued"
+	MsgBtwNoSession       MsgKey = "btw_no_session"
+	MsgBtwEmptyAnswer     MsgKey = "btw_empty_answer"
+	MsgForkUnsupported    MsgKey = "fork_unsupported"
+	MsgForkBusy           MsgKey = "fork_busy"
+	MsgForkNothing        MsgKey = "fork_nothing"
+	MsgForkCreated        MsgKey = "fork_created"
+	MsgForkStartFailed    MsgKey = "fork_start_failed"
+
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
 	MsgWhoamiName      MsgKey = "whoami_name"
@@ -625,6 +642,8 @@ const (
 	MsgBuiltinCmdDir       MsgKey = "dir"
 	MsgBuiltinCmdDiff      MsgKey = "diff"
 	MsgBuiltinCmdPs        MsgKey = "ps"
+	MsgBuiltinCmdBtw       MsgKey = "btw"
+	MsgBuiltinCmdFork      MsgKey = "fork"
 
 	MsgDiffEmpty       MsgKey = "diff_empty"
 	MsgDiffNoDiff2HTML MsgKey = "diff_no_diff2html"
@@ -1057,6 +1076,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <number>\n  Resume a session by its list number\n\n" +
 			"/delete <number>|1,2,3|3-7|1,3-5,8\n  Delete sessions by list number(s)\n\n" +
 			"/name [number] <text>\n  Name a session for easy identification\n\n" +
+			"/fork [name]\n  Fork the session into a new branch (source unchanged)\n\n" +
 			"/current\n  Show current active session\n\n" +
 			"/history [n]\n  Show last n messages (default 10)\n\n" +
 			"/provider [list|add|remove|switch|clear]\n  Manage API providers\n\n" +
@@ -1072,6 +1092,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/show <ref>\n  View a file, directory, or code snippet by reference\n\n" +
 			"/dir [path|reset]\n  Show, switch, or reset agent working directory\n\n" +
 			"/stop\n  Stop current execution\n\n" +
+			"/btw <question>\n  Side question; not added to session history\n\n" +
 			"/cron [add|list|exec|del|enable|disable]\n  Manage scheduled tasks\n\n" +
 			"/timer [add|list|del|mute|unmute]\n  Manage one-shot timers\n\n" +
 			"/heartbeat [status|pause|resume|run|interval]\n  Manage heartbeat\n\n" +
@@ -1101,6 +1122,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <序号>\n  按列表序号切换会话\n\n" +
 			"/delete <序号>|1,2,3|3-7|1,3-5,8\n  按列表序号批量/单个删除会话\n\n" +
 			"/name [序号] <名称>\n  给会话命名，方便识别\n\n" +
+			"/fork [名称]\n  把会话 fork 成新分支（原会话不变）\n\n" +
 			"/current\n  查看当前活跃会话\n\n" +
 			"/history [n]\n  查看最近 n 条消息（默认 10）\n\n" +
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
@@ -1116,6 +1138,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/show <引用>\n  按引用查看文件、目录或代码片段\n\n" +
 			"/dir [路径|reset]\n  查看、切换或重置 Agent 工作目录\n\n" +
 			"/stop\n  停止当前执行\n\n" +
+			"/btw <问题>\n  旁支提问，不计入会话历史\n\n" +
 			"/cron [add|list|exec|del|enable|disable]\n  管理定时任务\n\n" +
 			"/timer [add|list|del|mute|unmute]\n  管理一次性定时器\n\n" +
 			"/heartbeat [status|pause|resume|run|interval]\n  管理心跳\n\n" +
@@ -1145,6 +1168,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <序號>\n  按列表序號切換會話\n\n" +
 			"/delete <序號>|1,2,3|3-7|1,3-5,8\n  按列表序號批量/單筆刪除會話\n\n" +
 			"/name [序號] <名稱>\n  為會話命名，方便辨識\n\n" +
+			"/fork [名稱]\n  將會話 fork 成新分支（原會話不變）\n\n" +
 			"/current\n  查看當前活躍會話\n\n" +
 			"/history [n]\n  查看最近 n 條訊息（預設 10）\n\n" +
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
@@ -1159,6 +1183,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/shell [--timeout <秒>] <命令>\n  執行 Shell 命令並返回結果（快捷方式：!命令）\n\n" +
 			"/dir [路徑|reset]\n  查看、切換或重置 Agent 工作目錄\n\n" +
 			"/stop\n  停止當前執行\n\n" +
+			"/btw <問題>\n  旁支提問，不計入會話歷史\n\n" +
 			"/cron [add|list|exec|del|enable|disable]\n  管理定時任務\n\n" +
 			"/timer [add|list|del|mute|unmute]\n  管理一次性定時器\n\n" +
 			"/heartbeat [status|pause|resume|run|interval]\n  管理心跳\n\n" +
@@ -1187,6 +1212,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <番号>\n  リスト番号でセッションを切り替え\n\n" +
 			"/delete <番号>|1,2,3|3-7|1,3-5,8\n  リスト番号でセッションを単体/複数削除\n\n" +
 			"/name [番号] <名前>\n  セッションに名前を付ける\n\n" +
+			"/fork [名前]\n  セッションを新しいブランチに fork（元は変更なし）\n\n" +
 			"/current\n  現在のアクティブセッションを表示\n\n" +
 			"/history [n]\n  直近 n 件のメッセージを表示（デフォルト 10）\n\n" +
 			"/provider [list|add|remove|switch|clear]\n  API プロバイダ管理\n\n" +
@@ -1201,6 +1227,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/shell [--timeout <秒>] <コマンド>\n  シェルコマンドを実行して結果を返す（ショートカット：!コマンド）\n\n" +
 			"/dir [パス|reset]\n  エージェントの作業ディレクトリを表示/切り替え/リセット\n\n" +
 			"/stop\n  現在の実行を停止\n\n" +
+			"/btw <質問>\n  脇道の質問（履歴に残らない）\n\n" +
 			"/cron [add|list|exec|del|enable|disable]\n  スケジュールタスク管理\n\n" +
 			"/timer [add|list|del|mute|unmute]\n  ワンショットタイマー管理\n\n" +
 			"/heartbeat [status|pause|resume|run|interval]\n  ハートビート管理\n\n" +
@@ -1229,6 +1256,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <número>\n  Reanudar sesión por su número en la lista\n\n" +
 			"/delete <número>|1,2,3|3-7|1,3-5,8\n  Eliminar una o varias sesiones por número de lista\n\n" +
 			"/name [número] <texto>\n  Nombrar una sesión para fácil identificación\n\n" +
+			"/fork [nombre]\n  Bifurcar la sesión en una nueva rama (la original no cambia)\n\n" +
 			"/current\n  Mostrar sesión activa actual\n\n" +
 			"/history [n]\n  Mostrar últimos n mensajes (por defecto 10)\n\n" +
 			"/provider [list|add|remove|switch|clear]\n  Gestionar proveedores API\n\n" +
@@ -1243,6 +1271,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/shell [--timeout <seg>] <comando>\n  Ejecutar un comando shell y devolver la salida (atajo: !comando)\n\n" +
 			"/dir [ruta|reset]\n  Ver, cambiar o restablecer el directorio de trabajo del agente\n\n" +
 			"/stop\n  Detener ejecución actual\n\n" +
+			"/btw <pregunta>\n  Pregunta lateral; no entra en el historial\n\n" +
 			"/cron [add|list|exec|del|enable|disable]\n  Gestionar tareas programadas\n\n" +
 			"/timer [add|list|del|mute|unmute]\n  Gestionar temporizadores de uso único\n\n" +
 			"/heartbeat [status|pause|resume|run|interval]\n  Gestionar heartbeat\n\n" +
@@ -1281,6 +1310,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <number> — Resume a session\n" +
 			"/delete <number>|1,2,3|3-7|1,3-5,8 — Delete session(s)\n" +
 			"/name [number] <text> — Name a session\n" +
+			"/fork [name] — Fork session into a new branch\n" +
 			"/current — Show active session\n" +
 			"/history [n] — Show last n messages",
 		LangChinese: "**会话管理**\n" +
@@ -1290,6 +1320,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <序号> — 切换会话\n" +
 			"/delete <序号>|1,2,3|3-7|1,3-5,8 — 删除会话\n" +
 			"/name [序号] <名称> — 命名会话\n" +
+			"/fork [名称] — 把会话 fork 成新分支\n" +
 			"/current — 查看当前会话\n" +
 			"/history [n] — 查看最近 n 条消息",
 		LangTraditionalChinese: "**會話管理**\n" +
@@ -1299,6 +1330,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <序號> — 切換會話\n" +
 			"/delete <序號>|1,2,3|3-7|1,3-5,8 — 刪除會話\n" +
 			"/name [序號] <名稱> — 命名會話\n" +
+			"/fork [名稱] — 將會話 fork 成新分支\n" +
 			"/current — 查看當前會話\n" +
 			"/history [n] — 查看最近 n 條訊息",
 		LangJapanese: "**セッション管理**\n" +
@@ -1308,6 +1340,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <番号> — セッション切り替え\n" +
 			"/delete <番号>|1,2,3|3-7|1,3-5,8 — セッション削除\n" +
 			"/name [番号] <名前> — セッションに名前を付ける\n" +
+			"/fork [名前] — セッションを新しいブランチに fork\n" +
 			"/current — 現在のセッションを表示\n" +
 			"/history [n] — 直近 n 件のメッセージを表示",
 		LangSpanish: "**Gestión de sesiones**\n" +
@@ -1317,6 +1350,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/switch <número> — Reanudar sesión\n" +
 			"/delete <número>|1,2,3|3-7|1,3-5,8 — Eliminar sesión(es)\n" +
 			"/name [número] <texto> — Nombrar sesión\n" +
+			"/fork [nombre] — Bifurcar sesión en una nueva rama\n" +
 			"/current — Mostrar sesión activa\n" +
 			"/history [n] — Mostrar últimos n mensajes",
 	},
@@ -3481,6 +3515,125 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "目前沒有正在執行的任務。",
 		LangJapanese:           "現在実行中のタスクはありません。",
 		LangSpanish:            "No hay ninguna tarea en ejecución.",
+	},
+	MsgBtwUsage: {
+		LangEnglish:            "Usage: /btw <question> — ask a side question about the current conversation; the question and answer are not added to session history. /btw cancel stops the running one.",
+		LangChinese:            "用法：/btw <问题> —— 就当前对话提一个旁支问题，问题和回答都不会写入会话历史。/btw cancel 取消正在进行的旁支提问。",
+		LangTraditionalChinese: "用法：/btw <問題> —— 就目前對話提出旁支問題，問題與回答都不會寫入工作階段歷史。/btw cancel 取消進行中的旁支提問。",
+		LangJapanese:           "使い方: /btw <質問> — 現在の会話について脇道の質問をします。質問と回答はセッション履歴に追加されません。/btw cancel で実行中の質問を取り消します。",
+		LangSpanish:            "Uso: /btw <pregunta> — haz una pregunta lateral sobre la conversación actual; ni la pregunta ni la respuesta se añaden al historial. /btw cancel detiene la que está en curso.",
+	},
+	MsgBtwThinking: {
+		LangEnglish:            "⏳ Thinking…",
+		LangChinese:            "⏳ 思考中…",
+		LangTraditionalChinese: "⏳ 思考中…",
+		LangJapanese:           "⏳ 考え中…",
+		LangSpanish:            "⏳ Pensando…",
+	},
+	MsgBtwNotInHistory: {
+		LangEnglish:            "_not added to session history_",
+		LangChinese:            "_不计入会话历史_",
+		LangTraditionalChinese: "_不計入工作階段歷史_",
+		LangJapanese:           "_セッション履歴には追加されません_",
+		LangSpanish:            "_no se añade al historial_",
+	},
+	MsgBtwTimedOut: {
+		LangEnglish:            "⏱️ Timed out. Delivery stopped; the underlying model request may still finish and consume usage.",
+		LangChinese:            "⏱️ 超时。已停止投递；底层模型请求可能仍会完成并消耗用量。",
+		LangTraditionalChinese: "⏱️ 逾時。已停止傳送；底層模型請求仍可能完成並消耗用量。",
+		LangJapanese:           "⏱️ タイムアウトしました。配信は停止しましたが、モデルへのリクエストは完了して利用量を消費する場合があります。",
+		LangSpanish:            "⏱️ Tiempo agotado. Se detuvo la entrega; la solicitud al modelo aún puede terminar y consumir uso.",
+	},
+	MsgBtwCancelled: {
+		LangEnglish:            "💬 BTW `%s` cancelled.",
+		LangChinese:            "💬 BTW `%s` 已取消。",
+		LangTraditionalChinese: "💬 BTW `%s` 已取消。",
+		LangJapanese:           "💬 BTW `%s` を取り消しました。",
+		LangSpanish:            "💬 BTW `%s` cancelada.",
+	},
+	MsgBtwCancelledNote: {
+		LangEnglish:            "🚫 Cancelled. Delivery stopped; the underlying model request may still finish and consume usage.",
+		LangChinese:            "🚫 已取消。已停止投递；底层模型请求可能仍会完成并消耗用量。",
+		LangTraditionalChinese: "🚫 已取消。已停止傳送；底層模型請求仍可能完成並消耗用量。",
+		LangJapanese:           "🚫 取り消しました。配信は停止しましたが、モデルへのリクエストは完了して利用量を消費する場合があります。",
+		LangSpanish:            "🚫 Cancelada. Se detuvo la entrega; la solicitud al modelo aún puede terminar y consumir uso.",
+	},
+	MsgBtwNothingToCancel: {
+		LangEnglish:            "💬 No active BTW request to cancel.",
+		LangChinese:            "💬 当前没有可取消的 BTW 请求。",
+		LangTraditionalChinese: "💬 目前沒有可取消的 BTW 請求。",
+		LangJapanese:           "💬 取り消せる BTW リクエストはありません。",
+		LangSpanish:            "💬 No hay ninguna solicitud BTW activa para cancelar.",
+	},
+	MsgBtwQueued: {
+		LangEnglish:            "💬 BTW `%s` queued behind the active BTW request.",
+		LangChinese:            "💬 BTW `%s` 已排队，等待前一个旁支提问完成。",
+		LangTraditionalChinese: "💬 BTW `%s` 已排隊，等待前一個旁支提問完成。",
+		LangJapanese:           "💬 BTW `%s` は実行中の BTW の後ろに並びました。",
+		LangSpanish:            "💬 BTW `%s` en cola detrás de la solicitud BTW activa.",
+	},
+	MsgBtwNoSession: {
+		LangEnglish:            "💬 /btw needs a running session. Send a normal message first, then ask your side question.",
+		LangChinese:            "💬 /btw 需要一个已启动的会话：先发一条普通消息，再提旁支问题。",
+		LangTraditionalChinese: "💬 /btw 需要一個已啟動的工作階段：先傳送一則一般訊息，再提出旁支問題。",
+		LangJapanese:           "💬 /btw には起動中のセッションが必要です。まず通常のメッセージを送ってから質問してください。",
+		LangSpanish:            "💬 /btw necesita una sesión en ejecución. Envía primero un mensaje normal y luego haz tu pregunta.",
+	},
+	MsgBtwEmptyAnswer: {
+		LangEnglish:            "The side question returned an empty answer.",
+		LangChinese:            "旁支提问返回了空回答。",
+		LangTraditionalChinese: "旁支提問傳回了空白回答。",
+		LangJapanese:           "脇道の質問の回答が空でした。",
+		LangSpanish:            "La pregunta lateral devolvió una respuesta vacía.",
+	},
+	MsgForkUnsupported: {
+		LangEnglish:            "❌ This agent does not support /fork.",
+		LangChinese:            "❌ 当前 Agent 不支持 /fork。",
+		LangTraditionalChinese: "❌ 目前的 Agent 不支援 /fork。",
+		LangJapanese:           "❌ このエージェントは /fork に対応していません。",
+		LangSpanish:            "❌ Este agente no admite /fork.",
+	},
+	MsgForkBusy: {
+		LangEnglish:            "⏳ A task is running. Wait for it to finish (or /stop it), then /fork.",
+		LangChinese:            "⏳ 当前有任务在运行，请等它结束（或先 /stop）再 /fork。",
+		LangTraditionalChinese: "⏳ 目前有任務正在執行，請等它結束（或先 /stop）再 /fork。",
+		LangJapanese:           "⏳ タスクを実行中です。終了を待つか /stop してから /fork してください。",
+		LangSpanish:            "⏳ Hay una tarea en ejecución. Espera a que termine (o usa /stop) y luego /fork.",
+	},
+	MsgForkNothing: {
+		LangEnglish:            "💬 Nothing to fork yet — this session has no conversation.",
+		LangChinese:            "💬 当前会话还没有对话内容，无需 fork。",
+		LangTraditionalChinese: "💬 目前工作階段還沒有對話內容，無需 fork。",
+		LangJapanese:           "💬 このセッションにはまだ会話がないため fork できません。",
+		LangSpanish:            "💬 Aún no hay nada que bifurcar: esta sesión no tiene conversación.",
+	},
+	MsgForkCreated: {
+		LangEnglish:            "🍴 Forked into new session **%s** (source `%s` is unchanged). Your next message continues the branch with the full context; use /list and /switch to go back.",
+		LangChinese:            "🍴 已 fork 出新会话 **%s**（原会话 `%s` 保持不变）。下一条消息起在新分支上继续，带有完整上下文；用 /list 和 /switch 可切回原会话。",
+		LangTraditionalChinese: "🍴 已 fork 出新工作階段 **%s**（原工作階段 `%s` 保持不變）。下一則訊息起在新分支上繼續，帶有完整上下文；用 /list 和 /switch 可切回原工作階段。",
+		LangJapanese:           "🍴 新しいセッション **%s** に fork しました（元のセッション `%s` は変更されません）。次のメッセージから全コンテキスト付きでブランチを続けます。/list と /switch で元に戻れます。",
+		LangSpanish:            "🍴 Bifurcado en la nueva sesión **%s** (la sesión original `%s` no cambia). Tu próximo mensaje continúa la rama con todo el contexto; usa /list y /switch para volver.",
+	},
+	MsgForkStartFailed: {
+		LangEnglish:            "⚠️ Could not start the forked session; started a fresh session instead.",
+		LangChinese:            "⚠️ 无法启动 fork 出的会话，已改为开始一个全新会话。",
+		LangTraditionalChinese: "⚠️ 無法啟動 fork 出的工作階段，已改為開始一個全新工作階段。",
+		LangJapanese:           "⚠️ fork したセッションを開始できなかったため、新しいセッションを開始しました。",
+		LangSpanish:            "⚠️ No se pudo iniciar la sesión bifurcada; se inició una sesión nueva.",
+	},
+	MsgBuiltinCmdBtw: {
+		LangEnglish:            "Ask a side question; not added to history (agents without support: same as /ps)",
+		LangChinese:            "旁支提问，不计入会话历史（不支持的 Agent 等同 /ps）",
+		LangTraditionalChinese: "旁支提問，不計入工作階段歷史（不支援的 Agent 等同 /ps）",
+		LangJapanese:           "脇道の質問（履歴に残らない。非対応エージェントでは /ps と同じ）",
+		LangSpanish:            "Pregunta lateral que no entra en el historial (sin soporte: igual que /ps)",
+	},
+	MsgBuiltinCmdFork: {
+		LangEnglish:            "Fork the current session into a new branch, arg: [name]",
+		LangChinese:            "把当前会话 fork 成新分支，参数：[名称]",
+		LangTraditionalChinese: "將目前工作階段 fork 成新分支，參數：[名稱]",
+		LangJapanese:           "現在のセッションを新しいブランチに fork、引数: [名前]",
+		LangSpanish:            "Bifurcar la sesión actual en una nueva rama, arg: [nombre]",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",

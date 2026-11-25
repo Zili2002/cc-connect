@@ -16238,10 +16238,13 @@ func TestSessionName_ACPLikeFlow(t *testing.T) {
 }
 
 // TestBtwAlias_ResolvesToPs verifies that /btw is accepted as an alias for /ps.
-func TestBtwAlias_ResolvesToPs(t *testing.T) {
+// /btw is its own builtin now (native side questions); agents without side
+// question support still get the /ps behavior from cmdBtw — see
+// TestCmdBtw_AgentWithoutSideQuestionsKeepsPsBehavior and the CUJ A9 test.
+func TestBtwAlias_ResolvesToOwnBuiltin(t *testing.T) {
 	id := matchPrefix("btw", builtinCommands)
-	if id != "ps" {
-		t.Fatalf("matchPrefix(\"btw\") = %q, want \"ps\"", id)
+	if id != "btw" {
+		t.Fatalf("matchPrefix(\"btw\") = %q, want \"btw\"", id)
 	}
 	id2 := matchPrefix("ps", builtinCommands)
 	if id2 != "ps" {

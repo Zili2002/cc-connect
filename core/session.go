@@ -56,6 +56,13 @@ type Session struct {
 	// sessions cannot permanently occupy the active slot.
 	ExplicitActivatedAt time.Time `json:"explicit_activated_at,omitempty"`
 
+	// ForkFromAgentSessionID marks a session created by /fork whose agent-side
+	// branch does not exist yet. While AgentSessionID is empty, the next agent
+	// start forks from this source session instead of starting fresh (agents
+	// such as Claude Code only materialize a fork on its first turn). Cleared
+	// as soon as a real AgentSessionID is recorded.
+	ForkFromAgentSessionID string `json:"fork_from_agent_session_id,omitempty"`
+
 	mu        sync.Mutex `json:"-"`
 	busy      bool       `json:"-"`
 	busySince time.Time  `json:"-"` // custom 2026-09-12: when the busy lock was acquired (stale-lock self-heal)
@@ -199,6 +206,7 @@ func (s *Session) SetAgentInfo(agentSessionID, agentType, name string) {
 	s.AgentSessionID = agentSessionID
 	s.AgentType = agentType
 	s.Name = name
+	s.clearForkFromOnBind(agentSessionID)
 }
 
 // GetAgentSessionID atomically reads the agent session ID.
@@ -206,6 +214,29 @@ func (s *Session) GetAgentSessionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.AgentSessionID
+}
+
+// SetForkFrom records the agent session this (not yet started) session should
+// be forked from on its next agent start. An empty id clears the marker.
+func (s *Session) SetForkFrom(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ForkFromAgentSessionID = id
+}
+
+// GetForkFrom returns the pending fork source, or "" when none is pending.
+func (s *Session) GetForkFrom() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ForkFromAgentSessionID
+}
+
+// clearForkFromOnBind drops the pending fork marker once a real agent session
+// ID is bound: the fork has materialized. Must be called with s.mu held.
+func (s *Session) clearForkFromOnBind(id string) {
+	if id != "" && id != ContinueSession {
+		s.ForkFromAgentSessionID = ""
+	}
 }
 
 // SetName atomically updates the session's display name. The management
@@ -305,6 +336,7 @@ func (s *Session) SetAgentSessionID(id, agentType string) {
 	}
 	s.AgentSessionID = id
 	s.AgentType = agentType
+	s.clearForkFromOnBind(id)
 }
 
 // CompareAndSetAgentSessionID sets the agent session ID only if it is currently
@@ -321,6 +353,7 @@ func (s *Session) CompareAndSetAgentSessionID(id, agentType string) bool {
 	}
 	s.AgentSessionID = id
 	s.AgentType = agentType
+	s.clearForkFromOnBind(id)
 	return true
 }
 
@@ -792,6 +825,9 @@ func (sm *SessionManager) saveLocked() {
 			// restart; otherwise a /switch followed by a crash would lose the
 			// exemption and the next message after restart would be rotated.
 			ExplicitActivatedAt: s.ExplicitActivatedAt,
+			// A pending /fork must survive a restart so the branch is still
+			// created from its source on the next message.
+			ForkFromAgentSessionID: s.ForkFromAgentSessionID,
 		}
 		s.mu.Unlock()
 	}

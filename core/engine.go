@@ -484,6 +484,8 @@ type Engine struct {
 	// Interactive agent session management
 	interactiveMu     sync.Mutex
 	interactiveStates map[string]*interactiveState // key = sessionKey
+	// btwQueue serializes /btw side questions per conversation (see btw_fork.go).
+	btwQueue *btwQueue
 
 	// Teardown tracking. A session's state is removed from interactiveStates
 	// as soon as /stop is issued, but its OS process can live on for up to
@@ -790,6 +792,7 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		skills:                NewSkillRegistry(),
 		aliases:               make(map[string]string),
 		interactiveStates:     make(map[string]*interactiveState),
+		btwQueue:              newBtwQueue(),
 		closingSessions:       make(map[string]chan struct{}),
 		unsafeResume:          make(map[string]bool),
 		sendWorkDirs:          make(map[string]string),
@@ -4469,7 +4472,14 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 
 	isResume := startSessionID != ""
 	startAt := time.Now()
-	agentSession, err := agent.StartSession(e.ctx, startSessionID)
+	// A session created by /fork starts as a branch of its source session.
+	agentSession, forked := e.startAgentSessionMaybeFork(agent, session, sessions, p, replyCtx, sessionKey)
+	var err error
+	if forked {
+		isResume = true
+	} else {
+		agentSession, err = agent.StartSession(e.ctx, startSessionID)
+	}
 	startElapsed := time.Since(startAt)
 	if err != nil {
 		// If resume/continue failed, try a fresh session as fallback.
@@ -7099,7 +7109,9 @@ var builtinCommands = []struct {
 	{[]string{"whoami", "myid"}, "whoami"},
 	{[]string{"web"}, "web"},
 	{[]string{"diff"}, "diff"},
-	{[]string{"ps", "btw"}, "ps"},
+	{[]string{"ps"}, "ps"},
+	{[]string{"btw"}, "btw"},
+	{[]string{"fork"}, "fork"},
 }
 
 func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
@@ -7349,6 +7361,10 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdWeb(p, msg, args)
 	case "ps":
 		e.cmdPs(p, msg, args)
+	case "btw":
+		e.cmdBtw(p, msg, args)
+	case "fork":
+		e.cmdFork(p, msg, args)
 	default:
 		if custom, ok := e.commands.Resolve(cmd); ok {
 			if disabledCmds[strings.ToLower(custom.Name)] {
@@ -10122,6 +10138,7 @@ func helpCardGroups() []helpCardGroup {
 				{command: "/history", action: "nav:/history"},
 				{command: "/delete", action: "cmd:/delete"},
 				{command: "/name", action: "cmd:/name"},
+				{command: "/fork", action: "cmd:/fork"},
 			},
 		},
 		{
@@ -10154,6 +10171,7 @@ func helpCardGroups() []helpCardGroup {
 				{command: "/compress", action: "cmd:/compress"},
 				{command: "/stop", action: "act:/stop"},
 				{command: "/ps", action: "cmd:/ps"},
+				{command: "/btw", action: "cmd:/btw"},
 			},
 		},
 		{
