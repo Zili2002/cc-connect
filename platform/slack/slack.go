@@ -55,6 +55,10 @@ type Platform struct {
 	channelNameCache map[string]string
 	channelCacheMu   sync.RWMutex
 	userNameCache    sync.Map // userID -> display name
+	// botUserID is this app's own bot user (from auth.test at Start). Slack
+	// attributes system messages such as "<bot> has joined the channel" to
+	// it without a bot_id, so it must be filtered explicitly.
+	botUserID string
 	// dedup drops the second delivery of a message that Slack reports through
 	// more than one subscription. A message that @-mentions the bot arrives as
 	// BOTH an app_mention event and a message event, and the two are handled
@@ -173,6 +177,17 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+
+	// Resolve our own bot user before any event is handled so messages
+	// attributed to it are never dispatched back to the agent.
+	authCtx, authCancel := context.WithTimeout(ctx, 15*time.Second)
+	if auth, err := p.client.AuthTestContext(authCtx); err != nil {
+		slog.Warn("slack: auth.test failed; own messages are filtered by bot_id only",
+			"error", core.RedactToken(err.Error(), p.botToken))
+	} else {
+		p.botUserID = auth.UserID
+	}
+	authCancel()
 
 	go func() {
 		for {
@@ -293,6 +308,10 @@ func (p *Platform) handleEvent(evt socketmode.Event) {
 
 			case *slackevents.MessageEvent:
 				if ev.BotID != "" || ev.User == "" {
+					return
+				}
+				if isSystemMessageSubtype(ev.SubType) || (p.botUserID != "" && ev.User == p.botUserID) {
+					slog.Debug("slack: ignoring system or own message", "subtype", ev.SubType, "user", ev.User, "channel", ev.Channel)
 					return
 				}
 
@@ -828,4 +847,18 @@ func (p *Platform) Stop() error {
 		p.cancel()
 	}
 	return nil
+}
+
+// isSystemMessageSubtype reports whether a message event is a Slack system
+// event rather than content a user typed. With message.channels/message.groups
+// subscribed (to chat without @-mentions), events such as channel_join,
+// channel_purpose, channel_topic or pinned_item arrive as messages attributed to
+// a user and would otherwise be sent to the agent as prompts.
+func isSystemMessageSubtype(subtype string) bool {
+	switch subtype {
+	case "", "file_share", "thread_broadcast", "me_message":
+		return false
+	default:
+		return true
+	}
 }
