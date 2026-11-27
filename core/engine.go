@@ -8226,6 +8226,9 @@ func (e *Engine) replyFooterUsageText(session AgentSession, agent Agent) string 
 	if !ok {
 		return ""
 	}
+	if capCheck, ok := agent.(interface{ SupportsUsage() bool }); ok && !capCheck.SupportsUsage() {
+		return ""
+	}
 
 	e.replyFooterMu.Lock()
 	cached := e.replyFooterUsage
@@ -9440,23 +9443,36 @@ func (e *Engine) cmdStatus(p Platform, msg *Message) {
 }
 
 func (e *Engine) cmdUsage(p Platform, msg *Message) {
-	agent, _, _, err := e.commandContext(p, msg)
+	agent, _, interactiveKey, err := e.commandContext(p, msg)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
 		return
 	}
 
 	reporter, ok := agent.(UsageReporter)
+	if ok {
+		if capCheck, hasCap := agent.(interface{ SupportsUsage() bool }); hasCap && !capCheck.SupportsUsage() {
+			ok = false
+		}
+	}
 	if !ok {
+		if text := e.formatSessionContextUsageFallback(agent, interactiveKey); text != "" {
+			e.reply(p, msg.ReplyCtx, text)
+			return
+		}
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUsageNotSupported))
 		return
 	}
 
-	fetchCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+	fetchCtx, cancel := context.WithTimeout(e.ctx, 25*time.Second)
 	defer cancel()
 
 	report, err := reporter.GetUsage(fetchCtx)
 	if err != nil {
+		if fallback := e.formatSessionContextUsageFallback(agent, interactiveKey); fallback != "" {
+			e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUsageFetchFailed, err)+"\n\n"+fallback)
+			return
+		}
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUsageFetchFailed, err))
 		return
 	}
@@ -9466,7 +9482,140 @@ func (e *Engine) cmdUsage(p Platform, msg *Message) {
 		return
 	}
 
-	e.reply(p, msg.ReplyCtx, formatUsageReport(report, e.i18n.CurrentLang()))
+	body := formatUsageReport(report, e.i18n.CurrentLang())
+	if ctxSummary := e.formatSessionContextLine(agent, interactiveKey); ctxSummary != "" {
+		body += "\n\n" + ctxSummary
+	}
+	e.reply(p, msg.ReplyCtx, body)
+}
+
+// formatSessionContextLine returns a compact session context & token summary
+// (without the "account quota unavailable" disclaimer) to append beneath an
+// account-level UsageReport when a live session has context metrics.
+func (e *Engine) formatSessionContextLine(agent Agent, interactiveKey string) string {
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[interactiveKey]
+	var liveSess AgentSession
+	if state != nil && state.agentSession != nil && state.agentSession.Alive() {
+		liveSess = state.agentSession
+	}
+	e.interactiveMu.Unlock()
+
+	usage, hasReporter := replyFooterContextUsage(liveSess)
+	if !hasReporter || usage == nil {
+		return ""
+	}
+	isZH := e.i18n.CurrentLang() == LangChinese || e.i18n.CurrentLang() == LangTraditionalChinese
+	var parts []string
+	if model := replyFooterModel(liveSess, agent); model != "" {
+		parts = append(parts, "`"+model+"`")
+	}
+	if usage.ContextWindow > 0 {
+		used := usage.UsedTokens
+		if used <= 0 {
+			used = usage.TotalTokens
+		}
+		pct := float64(used) * 100 / float64(usage.ContextWindow)
+		if isZH {
+			parts = append(parts, fmt.Sprintf("上下文 %s / %s (%.1f%%)",
+				formatStatusTokenCount(used), formatStatusTokenCount(usage.ContextWindow), pct))
+		} else {
+			parts = append(parts, fmt.Sprintf("Context %s / %s (%.1f%%)",
+				formatStatusTokenCount(used), formatStatusTokenCount(usage.ContextWindow), pct))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if isZH {
+		return "当前会话：" + strings.Join(parts, " · ")
+	}
+	return "Current session: " + strings.Join(parts, " · ")
+}
+
+// formatSessionContextUsageFallback renders session-level context and token
+// usage for agents that implement ContextUsageReporter (e.g. ACP / Antigravity)
+// but do not expose account-level subscription quota via UsageReporter.
+func (e *Engine) formatSessionContextUsageFallback(agent Agent, interactiveKey string) string {
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[interactiveKey]
+	var liveSess AgentSession
+	if state != nil && state.agentSession != nil && state.agentSession.Alive() {
+		liveSess = state.agentSession
+	}
+	e.interactiveMu.Unlock()
+
+	usage, hasReporter := replyFooterContextUsage(liveSess)
+	if !hasReporter {
+		return ""
+	}
+	isZH := e.i18n.CurrentLang() == LangChinese || e.i18n.CurrentLang() == LangTraditionalChinese
+	if usage == nil {
+		if isZH {
+			return "📊 暂无本会话用量数据（请先发送一条消息）。\n注：当前 Agent 未提供账号级订阅配额查询。"
+		}
+		return "📊 No session usage data yet (send a message first).\nNote: account-level subscription quota is not exposed by this agent."
+	}
+
+	var lines []string
+	if isZH {
+		lines = append(lines, "📊 **当前会话用量**")
+	} else {
+		lines = append(lines, "📊 **Session Usage**")
+	}
+	if model := replyFooterModel(liveSess, agent); model != "" {
+		if isZH {
+			lines = append(lines, fmt.Sprintf("- 模型：`%s`", model))
+		} else {
+			lines = append(lines, fmt.Sprintf("- Model: `%s`", model))
+		}
+	}
+	if usage.ContextWindow > 0 {
+		used := usage.UsedTokens
+		if used <= 0 {
+			used = usage.TotalTokens
+		}
+		pct := float64(used) * 100 / float64(usage.ContextWindow)
+		if isZH {
+			lines = append(lines, fmt.Sprintf("- 上下文：%s / %s (%.1f%%)",
+				formatStatusTokenCount(used), formatStatusTokenCount(usage.ContextWindow), pct))
+		} else {
+			lines = append(lines, fmt.Sprintf("- Context: %s / %s (%.1f%%)",
+				formatStatusTokenCount(used), formatStatusTokenCount(usage.ContextWindow), pct))
+		}
+	}
+	var turnParts []string
+	if usage.InputTokens > 0 {
+		turnParts = append(turnParts, fmt.Sprintf("in %s", formatStatusTokenCount(usage.InputTokens)))
+	}
+	if usage.CachedInputTokens > 0 {
+		turnParts = append(turnParts, fmt.Sprintf("cache_read %s", formatStatusTokenCount(usage.CachedInputTokens)))
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		turnParts = append(turnParts, fmt.Sprintf("cache_write %s", formatStatusTokenCount(usage.CacheCreationInputTokens)))
+	}
+	if usage.OutputTokens > 0 {
+		turnParts = append(turnParts, fmt.Sprintf("out %s", formatStatusTokenCount(usage.OutputTokens)))
+	}
+	if usage.ReasoningOutputTokens > 0 {
+		turnParts = append(turnParts, fmt.Sprintf("thought %s", formatStatusTokenCount(usage.ReasoningOutputTokens)))
+	}
+	if usage.TotalTokens > 0 {
+		turnParts = append(turnParts, fmt.Sprintf("total %s", formatStatusTokenCount(usage.TotalTokens)))
+	}
+	if len(turnParts) > 0 {
+		if isZH {
+			lines = append(lines, "- 最近一轮："+strings.Join(turnParts, " · "))
+		} else {
+			lines = append(lines, "- Last turn: "+strings.Join(turnParts, " · "))
+		}
+	}
+	if isZH {
+		lines = append(lines, "_注：当前 Agent（ACP）未开放账号级订阅配额接口，仅展示会话上下文与 Token 用量。_")
+	} else {
+		lines = append(lines, "_Note: account-level subscription quota is not exposed over ACP; showing session context & token usage._")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatUsageReport(report *UsageReport, lang Language) string {
@@ -9483,6 +9632,36 @@ func formatUsageReport(report *UsageReport, lang Language) string {
 }
 
 func formatUsageBlocks(report *UsageReport, lang Language) string {
+	var nonEmpty []UsageBucket
+	for _, b := range report.Buckets {
+		if len(b.Windows) > 0 {
+			nonEmpty = append(nonEmpty, b)
+		}
+	}
+	if len(nonEmpty) > 1 {
+		var groups []string
+		for _, bucket := range nonEmpty {
+			primary, secondary := selectBucketWindows(bucket.Windows)
+			var parts []string
+			if bucket.Name != "" {
+				parts = append(parts, "**"+bucket.Name+"**")
+			}
+			if primary != nil {
+				parts = append(parts, formatUsageBlock(lang, primary))
+			}
+			if secondary != nil {
+				parts = append(parts, formatUsageBlock(lang, secondary))
+			}
+			if len(parts) > 0 {
+				groups = append(groups, strings.Join(parts, "\n"))
+			}
+		}
+		if len(groups) == 0 {
+			return ""
+		}
+		return "\n\n" + strings.Join(groups, "\n\n")
+	}
+
 	primary, secondary := selectUsageWindows(report)
 	var sections []string
 	if primary != nil {
@@ -9495,6 +9674,31 @@ func formatUsageBlocks(report *UsageReport, lang Language) string {
 		return ""
 	}
 	return "\n\n" + strings.Join(sections, "\n\n")
+}
+
+func selectBucketWindows(windows []UsageWindow) (*UsageWindow, *UsageWindow) {
+	if len(windows) == 0 {
+		return nil, nil
+	}
+	var primary, secondary *UsageWindow
+	for i := range windows {
+		w := &windows[i]
+		switch w.WindowSeconds {
+		case 18000:
+			primary = w
+		case 604800:
+			if secondary == nil {
+				secondary = w
+			}
+		}
+	}
+	if primary == nil && secondary != &windows[0] {
+		primary = &windows[0]
+	}
+	if secondary == nil && len(windows) > 1 && &windows[1] != primary {
+		secondary = &windows[1]
+	}
+	return primary, secondary
 }
 
 func accountDisplay(report *UsageReport) string {

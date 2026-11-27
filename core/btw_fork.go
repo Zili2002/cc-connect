@@ -260,6 +260,10 @@ func (e *Engine) cmdFork(p Platform, msg *Message, args []string) {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgForkUnsupported))
 		return
 	}
+	if capCheck, ok := agent.(interface{ SupportsFork() bool }); ok && !capCheck.SupportsFork() {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgForkUnsupported))
+		return
+	}
 	session := sessions.GetOrCreateActive(msg.SessionKey)
 	if session.Busy() {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgForkBusy))

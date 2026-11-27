@@ -62,6 +62,14 @@ type Agent struct {
 
 	activeSession atomic.Pointer[acpSession]
 
+	// agyAppDataDir optionally overrides the Antigravity CLI data dir
+	// (defaults to resolving --gemini-dir/--app-data-dir or ~/.gemini/antigravity-cli).
+	// Used by unit tests.
+	agyAppDataDir string
+
+	usageCacheMu sync.Mutex
+	usageCache   agyUsageCache
+
 	mu sync.RWMutex
 }
 
@@ -252,6 +260,11 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	pendingModel := a.modelOverride
 	a.modelsMu.RUnlock()
 
+	var agyDataDir string
+	if a.isAntigravityACP() {
+		agyDataDir = a.resolveAgyDataDir()
+	}
+
 	return newACPSession(ctx, acpSessionConfig{
 		command:         command,
 		args:            allArgs,
@@ -261,6 +274,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		authMethod:      authMethod,
 		initialMode:     pendingMode,
 		initialModel:    pendingModel,
+		agyAppDataDir:   agyDataDir,
 		callbacks:       a,
 	})
 }

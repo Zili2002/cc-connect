@@ -401,3 +401,84 @@ func TestSession_ForkMarkerPersistsAndClearsOnBind(t *testing.T) {
 		t.Fatalf("binding a real ID must clear the marker: %q", reloaded.GetForkFrom())
 	}
 }
+
+type nonForkingAgent struct {
+	btwAgent
+}
+
+func (a *nonForkingAgent) SupportsFork() bool { return false }
+
+func TestCmdFork_SupportsForkFalseRejected(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", &nonForkingAgent{}, []Platform{p}, "", LangEnglish)
+	s := e.sessions.GetOrCreateActive("test:u1")
+	s.SetAgentSessionID("src-1", "stub")
+	e.cmdFork(p, &Message{SessionKey: "test:u1", ReplyCtx: "ctx"}, nil)
+	if !sentContains(p, e.i18n.T(MsgForkUnsupported)) {
+		t.Fatalf("expected fork unsupported reply, got %v", p.getSent())
+	}
+}
+
+type ctxUsageSession struct {
+	stubAgentSession
+	usage *ContextUsage
+	model string
+}
+
+func (s *ctxUsageSession) GetContextUsage() *ContextUsage { return s.usage }
+func (s *ctxUsageSession) GetModel() string               { return s.model }
+
+func TestCmdUsage_ContextUsageFallback(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	key := "test:u1"
+	installLiveSession(e, key, &ctxUsageSession{
+		model: "gemini-4-neon",
+		usage: &ContextUsage{
+			UsedTokens:            9472,
+			ContextWindow:         1048576,
+			InputTokens:           2310,
+			CachedInputTokens:     7400,
+			OutputTokens:          68,
+			ReasoningOutputTokens: 53,
+			TotalTokens:           9778,
+		},
+	}, p)
+
+	e.cmdUsage(p, &Message{SessionKey: key, ReplyCtx: "ctx"})
+	if !sentContains(p, "gemini-4-neon") || !sentContains(p, "cache_read") || !sentContains(p, "thought") {
+		t.Fatalf("expected session context usage fallback, got %v", p.getSent())
+	}
+}
+
+func TestFormatUsageReport_MultipleBuckets(t *testing.T) {
+	report := &UsageReport{
+		Provider: "antigravity",
+		Email:    "user@example.com",
+		Plan:     "Google AI Pro",
+		Buckets: []UsageBucket{
+			{
+				Name:    "Gemini Models",
+				Allowed: true,
+				Windows: []UsageWindow{
+					{WindowSeconds: 604800, UsedPercent: 4, ResetAfterSeconds: 602340},
+					{WindowSeconds: 18000, UsedPercent: 13, ResetAfterSeconds: 15540},
+				},
+			},
+			{
+				Name:    "Claude & GPT Models",
+				Allowed: true,
+				Windows: []UsageWindow{
+					{WindowSeconds: 604800, UsedPercent: 0},
+					{WindowSeconds: 18000, UsedPercent: 0},
+				},
+			},
+		},
+	}
+	got := formatUsageReport(report, LangChinese)
+	for _, want := range []string{"user@example.com (Google AI Pro)", "**Gemini Models**", "**Claude & GPT Models**", "87%", "96%", "100%"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("multi-bucket usage output missing %q:\n%s", want, got)
+		}
+	}
+}

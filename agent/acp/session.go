@@ -56,6 +56,11 @@ type acpSession struct {
 	haveUsage      bool
 	availableModes []acpModeInfo
 	currentMode    string
+	currentModel   string
+
+	// sideCfg holds subprocess settings needed by SideQuestion (/btw) to
+	// spawn an isolated read-only sibling ACP process on a cloned session DB.
+	sideCfg acpSideConfig
 
 	// promptInFlight tracks active session/prompt RPCs. Text chunks that
 	// arrive while no prompt is in flight belong to background work (kimi
@@ -90,6 +95,7 @@ type acpSessionConfig struct {
 	authMethod      string
 	initialMode     string           // if non-empty, applied via session/set_mode after session/new
 	initialModel    string           // if non-empty, applied via session/set_config_option after handshake
+	agyAppDataDir   string           // if non-empty, enables Antigravity read-only /btw side questions
 	callbacks       sessionCallbacks // may be nil
 }
 
@@ -109,6 +115,13 @@ func newACPSession(ctx context.Context, cfg acpSessionConfig) (*acpSession, erro
 		toolInputByID: make(map[string]string),
 		acpSessID:     cfg.resumeSessionID,
 		callbacks:     cfg.callbacks,
+		sideCfg: acpSideConfig{
+			command:       cfg.command,
+			args:          append([]string(nil), cfg.args...),
+			extraEnv:      append([]string(nil), cfg.extraEnv...),
+			authMethod:    cfg.authMethod,
+			agyAppDataDir: cfg.agyAppDataDir,
+		},
 	}
 	s.alive.Store(true)
 
@@ -386,11 +399,23 @@ func (s *acpSession) absorbConfigOptions(options []acpConfigOption) {
 					Desc:  o.Description,
 				})
 			}
+			if opt.CurrentValue != "" {
+				s.modesMu.Lock()
+				s.currentModel = opt.CurrentValue
+				s.modesMu.Unlock()
+			}
 			if s.callbacks != nil {
 				s.callbacks.reportModels(opt.CurrentValue, models)
 			}
 		}
 	}
+}
+
+// GetModel returns the last model value observed or applied on this session.
+func (s *acpSession) GetModel() string {
+	s.modesMu.RLock()
+	defer s.modesMu.RUnlock()
+	return s.currentModel
 }
 
 // SetLiveModel changes the model of the active session via `session/set_config_option`.
@@ -411,6 +436,9 @@ func (s *acpSession) SetLiveModel(model string) bool {
 		slog.Warn("acp: session/set_config_option model failed", "error", err, "model", model)
 		return false
 	}
+	s.modesMu.Lock()
+	s.currentModel = model
+	s.modesMu.Unlock()
 	var resp struct {
 		ConfigOptions []acpConfigOption `json:"configOptions"`
 	}
@@ -887,20 +915,23 @@ func (s *acpSession) Send(prompt string, messageID string, images []core.ImageAt
 	}
 	slog.Debug("acp: session/prompt response", "session_id", sid, "response_len", len(res), "response", string(res))
 
-	// Absorb per-turn usage (esp. cachedReadTokens) into the context snapshot.
+	// Absorb per-turn usage (including cache read/write and thought tokens)
+	// into the context snapshot.
 	var pr struct {
 		Usage struct {
-			InputTokens      int `json:"inputTokens"`
-			OutputTokens     int `json:"outputTokens"`
-			TotalTokens      int `json:"totalTokens"`
-			CachedReadTokens int `json:"cachedReadTokens"`
+			InputTokens       int `json:"inputTokens"`
+			OutputTokens      int `json:"outputTokens"`
+			TotalTokens       int `json:"totalTokens"`
+			CachedReadTokens  int `json:"cachedReadTokens"`
+			CachedWriteTokens int `json:"cachedWriteTokens"`
+			ThoughtTokens     int `json:"thoughtTokens"`
 		} `json:"usage"`
 	}
-	if json.Unmarshal(res, &pr) == nil && (pr.Usage.InputTokens > 0 || pr.Usage.TotalTokens > 0) {
+	if json.Unmarshal(res, &pr) == nil && (pr.Usage.InputTokens > 0 || pr.Usage.OutputTokens > 0 || pr.Usage.TotalTokens > 0) {
 		s.usageMu.Lock()
-		if pr.Usage.CachedReadTokens > 0 {
-			s.lastUsage.CachedInputTokens = pr.Usage.CachedReadTokens
-		}
+		s.lastUsage.CachedInputTokens = pr.Usage.CachedReadTokens
+		s.lastUsage.CacheCreationInputTokens = pr.Usage.CachedWriteTokens
+		s.lastUsage.ReasoningOutputTokens = pr.Usage.ThoughtTokens
 		s.lastUsage.InputTokens = pr.Usage.InputTokens
 		s.lastUsage.OutputTokens = pr.Usage.OutputTokens
 		s.lastUsage.TotalTokens = pr.Usage.TotalTokens
